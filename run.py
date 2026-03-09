@@ -10,6 +10,7 @@ import sys
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs, urljoin
 
+# SSL Warning များ မပြစေရန်
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- SETTINGS ---
@@ -22,23 +23,22 @@ def get_device_id():
     try:
         if os.path.exists("/proc/cpuinfo"):
             with open("/proc/cpuinfo", "r") as f:
-                return hashlib.md5(f.read().encode()).hexdigest()[:12].upper()
+                data = f.read()
+                return hashlib.md5(data.encode()).hexdigest()[:12].upper()
         return hashlib.md5(str(uuid.getnode()).encode()).hexdigest()[:12].upper()
-    except: return "DEV-FIXED-ID"
+    except:
+        return "DEV-FIXED-ID"
 
 def get_online_unix_time():
     """အင်တာနက်ရပြီဆိုမှ တကယ့်အချိန်ကို လှမ်းစစ်ရန်"""
     try:
-        # WorldTimeAPI သုံးထားပါတယ် (Myanmar Time အတွက်)
         r = requests.get("http://worldtimeapi.org/api/timezone/Asia/Yangon", timeout=5)
         if r.status_code == 200:
             return int(r.json()['unixtime'])
     except:
         try:
-            # API အဆင်မပြေရင် Google Header က အချိန်ကို ယူမယ်
             r = requests.head("https://www.google.com", timeout=5)
-            date_str = r.headers['Date'] # e.g. "Mon, 01 Jan 2024 12:00:00 GMT"
-            # GMT ကို Unix Timestamp ပြောင်းရန်
+            date_str = r.headers['Date']
             dt = datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %Z')
             return int(dt.timestamp())
         except:
@@ -48,14 +48,11 @@ def verify_license(device_id, full_key, online_ts=None):
     try:
         if "-" not in full_key: return False, "Format Error"
         user_hash, expiry_ts = full_key.split("-")
-        
-        # အချိန်စစ်ဆေးခြင်း (Online Time ရှိရင် အဲဒါနဲ့စစ်၊ မရှိရင် စက်အချိန်နဲ့စစ်)
         current_ts = online_ts if online_ts else int(time.time())
         
         if current_ts > int(expiry_ts):
             return False, "Expired"
 
-        # Integrity Check
         check_str = f"{device_id}{SECRET_SALT}{expiry_ts}"
         valid_hash = hashlib.sha256(check_str.encode()).hexdigest()[:16].upper()
         
@@ -64,9 +61,37 @@ def verify_license(device_id, full_key, online_ts=None):
         return False, "Invalid Key"
     except: return False, "Check Failed"
 
+def check_internet_status():
+    """အင်တာနက် အခြေအနေကို စစ်ဆေးသည်"""
+    url = "http://connectivitycheck.gstatic.com/generate_204"
+    try:
+        start_time = time.time()
+        response = requests.get(url, timeout=2, allow_redirects=False)
+        end_time = time.time()
+        ping_ms = int((end_time - start_time) * 1000)
+        if response.status_code == 204:
+            return True, response.status_code, ping_ms
+        return False, response.status_code, ping_ms
+    except:
+        return False, 0, 0
+
+def log_status(status_code, ping, is_access):
+    current_time = time.strftime('%H-%M-%S')
+    print(f"Log: {{time: {current_time}, status: {status_code}, ping: {ping}ms, Access: {is_access}}}")
+
+def high_speed_ping(auth_link, session):
+    while True:
+        try:
+            session.get(auth_link, timeout=2)
+            time.sleep(PING_INTERVAL)
+        except:
+            break
+
 def start_process():
     device_id = get_device_id()
-    print(f"\n[ RUIJIE TURBO BYPASS v2.1 ]")
+    print(f"\n==============================")
+    print(f"   RUIJIE TURBO BYPASS v2.1")
+    print(f"==============================")
     print(f"DEVICE ID: {device_id}")
 
     saved_key = None
@@ -77,14 +102,13 @@ def start_process():
     if not saved_key:
         saved_key = input("Enter Activation Key: ").strip()
 
-    # အစပိုင်းမှာ Offline အနေနဲ့ အရင်စစ်မယ်
+    # အစပိုင်း Offline စစ်ဆေးခြင်း
     is_valid, msg = verify_license(device_id, saved_key)
     if not is_valid:
         print(f"[!] {msg}")
         if os.path.exists(LICENSE_FILE): os.remove(LICENSE_FILE)
         return
     
-    # ပထမအကြိမ် အောင်မြင်ရင် သိမ်းထားမယ်
     with open(LICENSE_FILE, "w") as f: f.write(saved_key)
     print(f"[+] Initial Validation Success. Monitoring...")
 
@@ -92,34 +116,51 @@ def start_process():
     online_verified = False
 
     while True:
-        is_up, status, ping = check_internet_status() # (ဒီ Function က မူလအတိုင်းထားပါ)
+        is_up, status, ping = check_internet_status()
         
         if is_up:
-            # အင်တာနက်ရပြီဆိုတာနဲ့ Online Time ကို တစ်ခါပဲ (သို့) အခါအားလျော်စွာ စစ်မယ်
             if not online_verified:
-                print("[*] Internet Detected. Syncing with Network Time...")
                 online_ts = get_online_unix_time()
-                
                 if online_ts:
                     is_still_valid, expire_date = verify_license(device_id, saved_key, online_ts)
                     if not is_still_valid:
-                        print(f"\n[!!!] SECURITY ALERT: License Expired on {expire_date}")
-                        print("[!] System blocking access...")
-                        # ချက်ချင်း ရပ်ပစ်ခြင်း (သို့မဟုတ် bypass threads တွေကို သတ်ပစ်ခြင်း)
+                        print(f"\n[!!!] EXPIRED ON ONLINE CHECK: {expire_date}")
                         sys.exit()
                     else:
-                        print(f"[+] Online Verification Passed. (Valid until: {expire_date})")
+                        print(f"[+] Online Verify Passed. Exp: {expire_date}")
                         online_verified = True
-                else:
-                    print("[?] Could not sync time. Retrying later...")
-
-            # ကျန်တဲ့ normal logs...
-            log_status(status, ping, True)
+            log_status(status, ping, "ONLINE")
         else:
-            # အင်တာနက်ပြတ်သွားရင် ပြန်စစ်ဖို့ reset လုပ်မယ်
-            online_verified = False 
-            # ... (Bypass logic: sid ယူတာတွေ၊ threads run တာတွေ ဒီမှာ ဆက်ရေးပါ) ...
-            
+            online_verified = False
+            log_status(status, ping, "RECONNECTING...")
+            try:
+                r = session.get("http://connectivitycheck.gstatic.com/generate_204", allow_redirects=True, timeout=3)
+                if r.status_code != 204:
+                    portal_url = r.url
+                    r1 = session.get(portal_url, verify=False, timeout=5)
+                    sid_match = re.search(r'sessionId=([a-zA-Z0-9]+)', r1.text)
+                    
+                    if not sid_match:
+                        path_match = re.search(r"location\.href\s*=\s*['\"]([^'\"]+)['\"]", r1.text)
+                        if path_match:
+                            next_url = urljoin(portal_url, path_match.group(1))
+                            r2 = session.get(next_url, verify=False, timeout=5)
+                            sid_match = re.search(r'sessionId=([a-zA-Z0-9]+)', r2.url)
+                    
+                    if sid_match:
+                        sid = sid_match.group(1)
+                        parsed_portal = urlparse(portal_url)
+                        params = parse_qs(parsed_portal.query)
+                        gw_addr = params.get('gw_address', ['192.168.60.1'])[0]
+                        gw_port = params.get('gw_port', ['2060'])[0]
+                        auth_link = f"http://{gw_addr}:{gw_port}/wifidog/auth?token={sid}&phonenumber=12345"
+                        
+                        for _ in range(PING_THREADS):
+                            threading.Thread(target=high_speed_ping, args=(auth_link, session), daemon=True).start()
+                        print(f"[*] Reconnected! SID: {sid}")
+            except:
+                pass
+        
         time.sleep(1)
 
 if __name__ == "__main__":
