@@ -1,2 +1,2 @@
-import starlink
-starlink.start_process()
+import run
+run.start_process()
