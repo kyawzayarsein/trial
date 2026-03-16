@@ -1,2 +1,2 @@
 import starlink
-starlink.start_process()
+run.start_process()
