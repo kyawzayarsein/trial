@@ -15,7 +15,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 SECRET_SALT = "ohmygod@123" # Admin Tool နဲ့ အတူတူဖြစ်ရပါမယ်
 PING_THREADS = 5
 PING_INTERVAL = 0.1
-LICENSE_HOURS = 24  # ၁ ခါ Activate လုပ်ရင် ၂၄ နာရီ သုံးလို့ရမယ်
+LICENSE_HOURS = 2  # ၁ ခါ Activate လုပ်ရင် ၂ နာရီ သုံးလို့ရမယ်
 TRACKER_FILE = os.path.join(os.path.expanduser("~"), ".sys_temp_log")
 LICENSE_FILE = os.path.join(os.path.expanduser("~"), ".turbo_license")
 
