@@ -15,7 +15,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 SECRET_SALT = "ohmygod@123"
 PING_THREADS = 5
 PING_INTERVAL = 0.1
-LICENSE_HOURS = 24  # အသုံးပြုနိုင်မည့် နာရီအရေအတွက်
+LICENSE_HOURS = 1  # အသုံးပြုနိုင်မည့် နာရီအရေအတွက်
 TRACKER_FILE = os.path.join(os.path.expanduser("~"), ".sys_temp_log")
 
 def get_stable_id():
